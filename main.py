@@ -1,5 +1,6 @@
 import xlwings as xw
 import pandas as pd
+from datetime import date, datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import sklearn.metrics as mt
@@ -40,17 +41,9 @@ def get_data(view=True) -> pd.DataFrame:
             df.index.name = df.index[1]
             df = df.iloc[2:, :]
 
-            # index yyyy-mm 으로 형식 변경
-            df.index = pd.to_datetime(df.index)
-            df.index = df.index.to_period('M')
-
-            # index 오름차순 정렬 --> 중복될 경우 뒤에 것만 남기기 위함
-            # (중복되는 월의 경우 데이터가 두번째에 있음)
-            df.sort_index(ascending=True, inplace=True)
-
-            # 중복 될 때 마지막 것만 남기고 제거
-            df = df.loc[~df.index.duplicated(keep='last')]
-
+            # # 중복 될 때 마지막 것만 남기고 제거
+            # df = df.loc[~df.index.duplicated(keep='last')]
+            #
             # while 문 돌면서 모든 데이터 합치기
             df_total = pd.concat([df_total, df], axis=1)
 
@@ -68,48 +61,29 @@ def get_data(view=True) -> pd.DataFrame:
     return df_total
 
 
-def add_signal(df_total: pd.DataFrame, start_date:str, last_date: str, view=True):
-    """
-    Ex) last_date = '2022-07' : 22년 6월까지의 데이터로 모델 학습 & 22년 7월 데이터로 8월 결과 예측
-    """
+def add_signal(df_total: pd.DataFrame, end_date, barrier:float, view=True):
 
-    start_date = pd.to_datetime(start_date).to_period('M')
-    last_date = pd.to_datetime(last_date).to_period('M')
+    end_date = datetime.strptime(end_date, "%Y-%m-%d")
+    df_total = df_total.loc[:end_date, :]
 
     # signal 생성
-    df_total['Diff 3Y'] = df_total['국채 3Y'].diff(1)
-    df_total['Diff 10Y'] = df_total['국채 10Y'].diff(1)
+    df_total['Diff 10Y'] = df_total['10Y'].diff(1)
 
-    df_total['Diff 3Y'] = df_total['Diff 3Y'].shift(-1)
     df_total['Diff 10Y'] = df_total['Diff 10Y'].shift(-1)
 
-    df_total = df_total.copy().loc[start_date:last_date, :]
-
     data_num = len(df_total.index)
-    sig_3Y = []
     sig_10Y = []
 
     for i in range(data_num):
-        if df_total['Diff 3Y'][i] < -0.06:
-            sig_3Y.append("하락")
-        elif (df_total['Diff 3Y'][i] >= -0.06) and (df_total['Diff 3Y'][i] <= 0.06):
-            sig_3Y.append("보합")
-        elif df_total['Diff 3Y'][i] > 0.06:
-            sig_3Y.append("상승")
-        else:
-            sig_3Y.append("")
-
-    for i in range(data_num):
-        if df_total['Diff 10Y'][i] < -0.06:
+        if df_total['Diff 10Y'][i] < -barrier:
             sig_10Y.append("하락")
-        elif (df_total['Diff 10Y'][i] >= -0.06) and (df_total['Diff 10Y'][i] <= 0.06):
+        elif (df_total['Diff 10Y'][i] >= -barrier) and (df_total['Diff 10Y'][i] <= barrier):
             sig_10Y.append("보합")
-        elif df_total['Diff 10Y'][i] > 0.06:
+        elif df_total['Diff 10Y'][i] > barrier:
             sig_10Y.append("상승")
         else:
             sig_10Y.append("")
 
-    df_total['sig 3Y'] = sig_3Y
     df_total['sig 10Y'] = sig_10Y
 
     if view == True:
@@ -120,46 +94,52 @@ def add_signal(df_total: pd.DataFrame, start_date:str, last_date: str, view=True
 
 if __name__ == "__main__":
     df = get_data(False)
-    df = add_signal(df, '2003-02', '2022-07')
+    df = add_signal(df, '2022-08-22', 0.01, True)
 
     # 0.모델 fitting --> 마지막 데이터는 예측용이니 제거
     df_fitting = df.iloc[:-1, :]
-    print(df_fitting)
 
     # 분석에 사용하지 않을 feature는 # 으로 주석처리
     x_features = [
-        '한은업황실적BSI(전산업)',
         '한은업황실적BSI(제조업)',
         '한은업황실적BSI(비제조업)',
-        '한은업황실적BSI(건설업)',
-        '한은업황전망BSI(전산업)',
+        # '한은업황실적BSI(건설업)',
         '한은업황전망BSI(제조업)',
         '한은업황전망BSI(비제조업)',
-        '한은업황전망BSI(건설업)',
+        # '한은업황전망BSI(건설업)',
         '경제심리지수',
-        '소비자물가지수',
+        '소비자물가(yoy)',
         '기대인플레이션율',
         'WTI',
-        '기준금리(증감)',
+        # 'S&P500골드만삭스원자재지수',
+        '기준금리',
         '달러원 환율',
         '코스피지수',
-        '아파트매매가격종합지수(서울)',
-        '주택매매가격종합지수(서울)',
+        'S&P500',
+        '상해종합지수',
         '소비자동향지수',
         '수출증가율',
-        # '일평균수출증가율',                 # from 2009-01
-        # '뉴스심리지수',                    # from 2005-01
-        '무역수지'
+        '무역수지',
+        '뉴스심리지수',
+        '선도금리 10Y',
+        '선도금리 3Y',
+        'Citi ESI(중국)',
+        'MOVE 지수',
+        # '현재경기판단CSI',
+        # '향후경기전망CSI',
+        # '금리수준전망CSI',
     ]
-
+    print(x_features)
     # x, y 데이터 지정
     x = df_fitting[x_features]
-    print(f'결측치 존재 여부: {x.isnull().sum()}')
+    print(f'결측치 존재 여부:\n{x.isnull().sum()}')
+    x = x.dropna()
+    # xw.view(x)
+    print(f'NA 제거 후 결측치 존재 여부:\n{x.isnull().sum()}')
 
-    # Y로 설정하고 싶은 금리 주석 해제
-    y = df_fitting['sig 3Y']
-    #y = df_fitting['sig 10Y']
-
+    # Y
+    y = df_fitting['sig 10Y'][x.index]
+    # xw.view(y)
 
     # 1. 데이터 분할
     test_ratio = 0.3
@@ -221,8 +201,6 @@ if __name__ == "__main__":
     print("(of all)")
     print("상승", "보합", "하락")
     print(cm2)
-
-
 
     # 7. 변수 중요도 체크
     print("\n<Feature importance>")
